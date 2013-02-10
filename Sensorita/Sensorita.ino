@@ -1,9 +1,12 @@
+// -*-c++-*-
+
 #include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <LiquidCrystal.h>
 #include <EmonLib.h>
 #include "DHT.h"
+#include "Sensors.h"
 
 #include <avr/wdt.h>
 
@@ -11,29 +14,30 @@
 #define DHTPIN 11
 #define DHTTYPE DHT22 
 DHT dht(DHTPIN, DHTTYPE);
-float DHT_T;
-float DHT_H;
-const char* DHT_Name = "VO RECHTS";
+
 
 // current sensor
 EnergyMonitor emon;
 const int CurrentPin = 1; // analog pin1
-double EnergyAmpere  = 0;
-double EnergyWatts   = 0;
-long EnergyVcc       = 0;
+
 
 // DS1820 Dallas Temp Seonsors
 // Specify the same count on all 3 variables
-int TempPins = 4;
+int TempPins = 5;
 DeviceAddress DallasAddresses[4]; 
-float CurrentTemps[4];
 
 
 // Dallas Onewire patched to:
 #define ONE_WIRE_BUS 10
 OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature sensors(&oneWire);
-const char* TempNames[] = { "LI UNTEN", "HINT LI OBEN", "HINT RE UNTEN", "RE OBEN" };
+DallasTemperature dallas(&oneWire);
+
+
+// our sensor storage
+Sensor SensorsT[5]; // DS1820 + DHT22 Temp sensor
+Sensor SensorL;     // LDR light sensor
+Sensor SensorH;     // DHT22 humidity sensor
+EmonSensor SensorP;  // SCT13 power sensor
 
 // LCD Pins, patched to:
 //                RS, E, D4, D5, D6, D7
@@ -48,7 +52,6 @@ byte deg[8] = { 0x2,0x5,0x2,0x0,0x0,0x0,0x0 };
 // LDR patch and vars
 const int photocellPin = 0;
 int photocellReading;
-int lux;
 float ref = 1.0;
 float vout;
 
@@ -76,7 +79,7 @@ bool BacklightOn = false;
 int MenuMode, PreviousMode          = 0;
 
 // various menu modi we support
-int MenuMain, MenuLightsOn, MenuLux, MenuHumidity, MenuCurrent, MenuDHT = 0;
+int MenuMain, MenuLightsOn, MenuLux, MenuHumidity, MenuCurrent = 0;
 
 // when to read sensors, milliseconds
 const unsigned long SensorReadIntervall = 5000; // every 5 seconds
@@ -86,195 +89,6 @@ unsigned long SensorMoment    = 0;
 
 
 
-
-
-void setup()   {                
-  Serial.begin(9600);
-
-  // connect the lcs
-  lcd.createChar(0, deg);
-  lcd.begin(16, 2);
-  delay(1000);  
-
-  // initialize dallas temperature sensors
-  sensors.begin();
-
-  //initialize the dht22
-  dht.begin();
-
-  // how many of them do we have?
-  TempPins = sensors.getDeviceCount();
-
-  // calculate menu poins
-  MenuLightsOn = 1;
-  MenuDHT      = TempPins + 2;
-  MenuLux      = MenuDHT + 1;
-  MenuHumidity = MenuLux + 1;
-  MenuCurrent  = MenuHumidity + 1;
-
-  // various pins
-  pinMode(ControlButton, INPUT);
-  pinMode(ResetButton, INPUT);
-  pinMode(LCDBacklight, OUTPUT);
-
-  // use interrupts for user buttons
-  attachInterrupt(ControlInterrupt, control_pressed, RISING);
-  attachInterrupt(ResetInterrupt, reboot,   RISING);
-
-  // initialize current sensor
-  emon.current(CurrentPin, 111.1); 
-
-  // fetch sensor values for the 1st time
-  get_sensors();
-
-  // enable 8 seconds watchdog timer
-  wdt_enable(WDTO_8S);
-}
-
-
-void get_sensors () {
-  // fetch all sensor readings
-  get_dallas();
-  get_lux();
-  get_dht();
-  get_current();
-}
-
-
-void get_dallas () {
-  // fetch all dallas DS1820 temperature readings
-  sensors.requestTemperatures();
-  for (int id=0; id<TempPins; id++) {
-    CurrentTemps[id] = sensors.getTempCByIndex(id);
-  }
-}
-
-void get_lux () {
-  // fetch photocell reading and calculate lux
-  photocellReading = analogRead(photocellPin);
-  vout = 0.0048828125 * photocellReading;
-  lux  = 500 / (ref * ((5 - vout) / vout));
-}
-
-void get_current () {
-  // get SCT13 reading and calculate ampere and watts
-  EnergyAmpere = emon.calcIrms(1480) / 100;
-  EnergyWatts  = EnergyAmpere * 230.0;
-}
-
-void get_dht () {
-  // get DHT22 temperature and humidity reading
-  float t = dht.readTemperature();
-  if (isnan(t)) {
-    DHT_T = 0;
-  }
-  else {
-    DHT_T = t;
-  }
-  float h = dht.readHumidity();
-  if (isnan(h)) {
-    DHT_H = 0;
-  }
-  else {
-    DHT_H  = h;
-  }
-}
-
-void screen () {
-  // print the lcd display. what will be displayed depends on
-  // the value of MenuMode
-  if (MenuMode == MenuMain || MenuMode == MenuLightsOn) {
-    // main, display temp average and lux
-    // FIXME: show rounded integers of all sensors here
-    float SumTemp = DHT_T;
-    for (int id=0; id<TempPins; id++) {
-      SumTemp += CurrentTemps[id];
-    }
-    SumTemp = SumTemp / (TempPins + 1); // average
-    
-    lcd.setCursor(0, 0);
-    lcd.print(SumTemp);
-    lcd.write((uint8_t)0);
-    lcd.print("C  ");
-
-    lcd.print(DHT_H);
-    lcd.print("%");
-
-    lcd.setCursor(0, 1);
-    lcd.print(lux);
-    lcd.print(" Lux  ");
-    
-    lcd.print(int(EnergyWatts));
-    lcd.print("W");
-  }
-  else if (MenuMode == MenuLux) {
-    // display lux sensors
-    lcd.setCursor(0, 0);
-    lcd.print("Light: ");
-    lcd.setCursor(0,1);
-    lcd.print(lux);
-    lcd.print(" Lux  ");
-  }
-  else if (MenuMode > MenuLightsOn && MenuMode < MenuDHT) {
-    // one temp sensor per screen
-    int id = MenuMode - 2;
-    lcd.setCursor(0, 0);
-    lcd.print(TempNames[id]);
-    lcd.setCursor(0, 1);
-    lcd.print(" Temp: ");
-    lcd.print(CurrentTemps[id]);
-    lcd.print(" ");
-    lcd.write((uint8_t)0);
-    lcd.print("C");
-  }
-  else if(MenuMode == MenuDHT) {
-    // DHT temp display
-    lcd.setCursor(0, 0);
-    lcd.print(DHT_Name);
-    lcd.setCursor(0, 1);
-    lcd.print(" Temp: ");
-    lcd.print(DHT_T);
-    lcd.print(" ");
-    lcd.write((uint8_t)0);
-    lcd.print("C");
-  }
-  else if(MenuMode == MenuHumidity) {
-    // DHT Humidity display
-    lcd.setCursor(0, 0);
-    lcd.print("Humidity");
-    lcd.setCursor(0, 1);
-    lcd.print(DHT_H);
-    lcd.print(" %");
-  }
-  else if(MenuMode == MenuCurrent) {
-    // Watt + Ampere display
-    lcd.setCursor(0, 0);
-    lcd.print("Ampere: ");
-    lcd.print(EnergyAmpere);
-    lcd.setCursor(0, 1);
-    lcd.print(" Watts: ");
-    lcd.print(EnergyWatts);
-  }
-  else if (MenuMode == 15) {
-    // testmode
-     lcd.setCursor(0, 0);
-     lcd.print(LCDMoment);
-     lcd.setCursor(0, 1);
-     lcd.print(LCDTimer);
-     lcd.print(" ");
-     lcd.print(CurrentTemps[0]);
-  }
-  else if(MenuMode == 16) {
-    // test mode
-    lcd.setCursor(0, 0);
-    lcd.print(" Menumode: ");
-    lcd.print(MenuMode);
-    lcd.print("    ");
-    lcd.setCursor(0, 1);
-    lcd.print(LCDMoment - LCDTimer);
-    lcd.print("   ");
-  }
-}
 
 void reboot () {
   asm volatile ("  jmp 0");
@@ -297,6 +111,223 @@ void control_pressed() {
  // and reset backlight timeout
  LCDTimer = LCDMoment;
 }
+
+
+
+
+void setup()   {                
+  Serial.begin(9600);
+
+  // connect the lcs
+  lcd.createChar(0, deg);
+  lcd.begin(16, 2);
+  delay(1000);  
+
+  // initialize dallas temperature sensors
+  dallas.begin();
+
+  //initialize the dht22
+  dht.begin();
+
+  // how many of them do we have?
+  TempPins = dallas.getDeviceCount() + 1;
+
+  // initialize sensor structs
+  // DHT = 0
+  for(int id=0; id<TempPins+1; id++) {
+    SensorsT[id].current = 0;
+    SensorsT[id].min     = 0;
+    SensorsT[id].max     = 0;
+  }
+  SensorL.current = 0;
+  SensorL.min     = 0;
+  SensorL.max     = 0;
+
+  SensorH.current = 0;
+  SensorH.min     = 0;
+  SensorH.max     = 0;
+
+  SensorP.AmpereCurrent = 0;
+  SensorP.AmpereMin     = 0;
+  SensorP.AmpereMax     = 0;
+  SensorP.WattsCurrent  = 0;
+  SensorP.WattsMin      = 0;
+  SensorP.WattsMax      = 0;
+
+  // calculate menu poins
+  MenuLightsOn = 1;
+  MenuHumidity = TempPins     + 2; // lightson + dht
+  MenuLux      = MenuHumidity + 1;
+  MenuCurrent  = MenuLux      + 1;
+
+  // various pins
+  pinMode(ControlButton, INPUT);
+  pinMode(ResetButton, INPUT);
+  pinMode(LCDBacklight, OUTPUT);
+
+  // use interrupts for user buttons
+  attachInterrupt(ControlInterrupt, control_pressed, RISING);
+  attachInterrupt(ResetInterrupt, reboot,   RISING);
+
+  // initialize current sensor
+  emon.current(CurrentPin, 111.1); 
+
+  // enable 8 seconds watchdog timer
+  wdt_enable(WDTO_8S);
+}
+
+
+
+void get_dallas () {
+  // fetch all dallas DS1820 temperature readings
+  dallas.requestTemperatures();
+  for (int id=1; id<TempPins+1; id++) {
+    SensorsT[id].current = dallas.getTempCByIndex(id);
+    minmax_f(&SensorsT[id]);
+  }
+}
+
+void get_lux () {
+  // fetch photocell reading and calculate lux
+  photocellReading = analogRead(photocellPin);
+  vout             = 0.0048828125 * photocellReading;
+  SensorL.current  = 500 / (ref * ((5 - vout) / vout));
+  minmax_f(&SensorL);
+}
+
+void get_ampere () {
+  // get SCT13 reading and calculate ampere and watts
+  SensorP.AmpereCurrent = emon.calcIrms(1480) / 100;
+  minmax_d(&SensorP);
+}
+
+void get_dht () {
+  // get DHT22 temperature and humidity reading
+  float t = dht.readTemperature();
+  if (isnan(t)) {
+    SensorsT[0].current = 0;
+  }
+  else {
+    SensorsT[0].current = t;
+  }
+  float h = dht.readHumidity();
+  if (isnan(h)) {
+    SensorH.current = 0;
+  }
+  else {
+    SensorH.current = h;
+  }
+  minmax_f(&SensorsT[0]);
+  minmax_f(&SensorH);
+}
+
+
+void get_sensors () {
+  // fetch all sensor readings
+  get_dallas();
+  get_lux();
+  get_dht();
+  get_ampere();
+}
+
+void screen () {
+  // print the lcd display. what will be displayed depends on
+  // the value of MenuMode
+  if (MenuMode == MenuMain || MenuMode == MenuLightsOn) {
+    // main, display temp average and lux
+    // FIXME: show rounded integers of all sensors here
+    float SumTemp = 0;
+    for (int id=0; id<TempPins; id++) {
+      SumTemp += SensorsT[id].current;
+    }
+    SumTemp = SumTemp / TempPins; // average
+    
+    lcd.setCursor(0, 0);
+    lcd.print(SumTemp);
+    lcd.write((uint8_t)0);
+    lcd.print("C  ");
+
+    lcd.print(SensorH.current);
+    lcd.print(" %");
+
+    lcd.setCursor(0, 1);
+    lcd.print((int)SensorL.current);
+    lcd.print(" Lux  ");
+    
+    lcd.print(int(SensorP.WattsCurrent));
+    lcd.print(" W   ");
+  }
+  else if (MenuMode == MenuLux) {
+    // display lux sensors
+    lcd.setCursor(0, 0);
+    lcd.print("Lux: ");
+    lcd.print(SensorL.current);
+    lcd.print("            ");
+    
+    lcd.setCursor(0, 1);
+    lcd.print("- ");
+    lcd.print((int)SensorL.min);
+    lcd.print(" + ");
+    lcd.print((int)SensorL.max);
+    lcd.print("       ");
+  }
+  else if (MenuMode > MenuLightsOn && MenuMode < MenuHumidity) {
+    // one temp sensor per screen
+    int id = MenuMode - 2;
+    lcd.setCursor(0, 0);
+    if(id == 0) {
+      lcd.print("DHT");
+    }
+    else {
+      lcd.print("DS");
+      lcd.print(id);
+    }
+    lcd.print(" ");
+    lcd.write((uint8_t)0);
+    lcd.print("C ");
+
+    lcd.print(SensorsT[id].current);
+    lcd.print(" ");
+
+    lcd.setCursor(0, 1);
+    lcd.print("- ");
+    lcd.print(SensorsT[id].min);
+    lcd.print(" + ");
+    lcd.print(SensorsT[id].max);
+    lcd.print("   ");
+  }
+  else if(MenuMode == MenuHumidity) {
+    // DHT Humidity display
+    lcd.setCursor(0, 0);
+    lcd.print("Humidity: ");
+    lcd.print(SensorH.current);
+    lcd.print("%    ");
+    
+    lcd.setCursor(0, 1);
+    lcd.print("- ");
+    lcd.print(SensorH.min);
+    lcd.print(" + ");
+    lcd.print(SensorH.max);
+    lcd.print("     ");
+  }
+  else if(MenuMode == MenuCurrent) {
+    // Watt + Ampere display
+    lcd.setCursor(0, 0);
+    lcd.print(SensorP.AmpereCurrent);
+    lcd.print(" A  ");
+    lcd.print(SensorP.WattsCurrent);
+    lcd.print(" W    ");
+    
+    lcd.setCursor(0, 1);
+    lcd.print("Max: ");
+    lcd.print((int)SensorP.AmpereMax);
+    lcd.print("A ");
+    lcd.print((int)SensorP.WattsMax);
+    lcd.print("W ");
+  }
+}
+
+
 
 void loop(void) {
   // record current moments
