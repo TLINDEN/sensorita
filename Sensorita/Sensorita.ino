@@ -181,8 +181,8 @@ void setup()   {
 void get_dallas () {
   // fetch all dallas DS1820 temperature readings
   dallas.requestTemperatures();
-  for (int id=1; id<TempPins+1; id++) {
-    SensorsT[id].current = dallas.getTempCByIndex(id);
+  for (int id=1; id < TempPins; id++) {
+    SensorsT[id].current = dallas.getTempCByIndex(id - 1); // dallas starts count from 0
     if(SensorsT[id].current < 70) {
       minmax_f(&SensorsT[id]);
     }
@@ -231,6 +231,14 @@ void get_sensors () {
   get_dht();
   get_ampere();
 }
+
+void printAddress(DeviceAddress deviceAddress) {
+  for (uint8_t i = 0; i < 8; i++) {
+    if (deviceAddress[i] < 16) lcd.print("0");
+    lcd.print(deviceAddress[i], HEX);
+  }
+}
+
 
 void screen () {
   // print the lcd display. what will be displayed depends on
@@ -297,6 +305,14 @@ void screen () {
     lcd.print(" + ");
     lcd.print(SensorsT[id].max);
     lcd.print("   ");
+
+    /*
+    DeviceAddress tempDeviceAddress;
+    if(dallas.getAddress(tempDeviceAddress, id)) {
+      lcd.setCursor(0,1);
+      printAddress(tempDeviceAddress);
+    }
+    */
   }
   else if(MenuMode == MenuHumidity) {
     // DHT Humidity display
