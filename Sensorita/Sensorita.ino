@@ -193,7 +193,7 @@ void get_lux () {
   // fetch photocell reading and calculate lux
   photocellReading = analogRead(photocellPin);
   vout             = 0.0048828125 * photocellReading;
-  SensorL.current  = 500 / (ref * ((5 - vout) / vout));
+  SensorL.current  = 5000.0 / (ref * ((5.0 - vout) / vout));
   minmax_f(&SensorL);
 }
 
