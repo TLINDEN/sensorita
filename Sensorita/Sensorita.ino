@@ -181,11 +181,17 @@ void setup()   {
 void get_dallas () {
   // fetch all dallas DS1820 temperature readings
   dallas.requestTemperatures();
+<<<<<<< HEAD
   for (int id=1; id < TempPins; id++) {
     SensorsT[id].current = dallas.getTempCByIndex(id - 1); // dallas starts count from 0
     if(SensorsT[id].current < 70) {
       minmax_f(&SensorsT[id]);
     }
+=======
+  for (int id=1; id<TempPins+1; id++) {
+    SensorsT[id].current = dallas.getTempCByIndex(id);
+    minmax_f(&SensorsT[id]);
+>>>>>>> 8e0d354f64cce306e740254d8ebeeac03e9251c2
   }
 }
 
@@ -193,7 +199,11 @@ void get_lux () {
   // fetch photocell reading and calculate lux
   photocellReading = analogRead(photocellPin);
   vout             = 0.0048828125 * photocellReading;
+<<<<<<< HEAD
   SensorL.current  = 5000.0 / (ref * ((5.0 - vout) / vout));
+=======
+  SensorL.current  = 500 / (ref * ((5 - vout) / vout));
+>>>>>>> 8e0d354f64cce306e740254d8ebeeac03e9251c2
   minmax_f(&SensorL);
 }
 
@@ -218,6 +228,7 @@ void get_dht () {
   }
   else {
     SensorH.current = h;
+<<<<<<< HEAD
   }
   minmax_f(&SensorsT[0]);
   minmax_f(&SensorH);
@@ -236,7 +247,20 @@ void printAddress(DeviceAddress deviceAddress) {
   for (uint8_t i = 0; i < 8; i++) {
     if (deviceAddress[i] < 16) lcd.print("0");
     lcd.print(deviceAddress[i], HEX);
+=======
+>>>>>>> 8e0d354f64cce306e740254d8ebeeac03e9251c2
   }
+  minmax_f(&SensorsT[0]);
+  minmax_f(&SensorH);
+}
+
+
+void get_sensors () {
+  // fetch all sensor readings
+  get_dallas();
+  get_lux();
+  get_dht();
+  get_ampere();
 }
 
 
@@ -305,6 +329,7 @@ void screen () {
     lcd.print(" + ");
     lcd.print(SensorsT[id].max);
     lcd.print("   ");
+<<<<<<< HEAD
 
     /*
     DeviceAddress tempDeviceAddress;
@@ -313,6 +338,8 @@ void screen () {
       printAddress(tempDeviceAddress);
     }
     */
+=======
+>>>>>>> 8e0d354f64cce306e740254d8ebeeac03e9251c2
   }
   else if(MenuMode == MenuHumidity) {
     // DHT Humidity display
