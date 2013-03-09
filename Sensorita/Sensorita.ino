@@ -1,6 +1,5 @@
 // -*-c++-*-
 
-
 #include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -10,6 +9,10 @@
 #include "Sensors.h"
 
 #include <avr/wdt.h>
+
+// how long are we running
+long uptime = 0;
+const int MAXUP = 86400;
 
 // temp+humidity sensor
 #define DHTPIN 11
@@ -84,9 +87,11 @@ int MenuMain, MenuLightsOn, MenuLux, MenuHumidity, MenuCurrent = 0;
 
 // when to read sensors, milliseconds
 const unsigned long SensorReadIntervall = 5000; // every 5 seconds
+const unsigned long LogIntervall        = 60000; // every 1 minute
 unsigned long SensorTimer     = 0;
 unsigned long SensorMoment    = 0;
-
+unsigned long LogTimer        = 0;
+unsigned long LogMoment       = 0;
 
 
 
@@ -117,7 +122,8 @@ void control_pressed() {
 
 
 void setup()   {                
-  Serial.begin(9600);
+  Serial1.begin(9600);
+  while (!Serial1) ;
 
   // connect the lcs
   lcd.createChar(0, deg);
@@ -240,6 +246,28 @@ void printAddress(DeviceAddress deviceAddress) {
   }
 }
 
+void log_sensors() {
+  // log sensor values to TTL serial out
+  for (int id=0; id<TempPins; id++) {
+    Serial1.print(SensorsT[id].current);
+    Serial1.print('/');
+  }
+
+  Serial1.print(SensorH.current);
+  Serial1.print('/');
+
+  Serial1.print(SensorL.current);
+  Serial1.print('/');
+
+  Serial1.print(SensorP.AmpereCurrent);
+  Serial1.print('/');
+
+  Serial1.print(SensorP.WattsCurrent);
+  Serial1.print('/');
+
+  Serial1.print(uptime);
+  Serial1.println('/');
+}
 
 void screen () {
   // print the lcd display. what will be displayed depends on
@@ -350,7 +378,7 @@ void screen () {
 
 void loop(void) {
   // record current moments
-  LCDMoment = SensorMoment = millis();
+  LCDMoment = SensorMoment = LogMoment = millis();
 
   // check if there is enough time gone, to re-check the sensors
   if (SensorMoment - SensorTimer > SensorReadIntervall) {
@@ -378,6 +406,12 @@ void loop(void) {
     }
     PreviousMode = 0;
   }
+  
+  // log sensor values to serial1
+  if (LogMoment - LogTimer > LogIntervall) {
+    log_sensors();
+    LogTimer = LogMoment;
+  }
 
   // reset watchdog to keep us running
   wdt_reset();
@@ -388,4 +422,9 @@ void loop(void) {
   // for debugging, put current menu
   //lcd.setCursor(15, 1);
   //lcd.print(MenuMode);
+
+  if(uptime < MAXUP) {
+    // log uptime in seconds
+    uptime = millis() / 1000;
+  }
 }
