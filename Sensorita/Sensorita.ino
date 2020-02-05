@@ -1,5 +1,13 @@
 // -*-c++-*-
 
+/*
+ * Collect sensor data, display on LCD and
+ * send via HW-Serial to Leonardo (see EtherLog.ino),
+ * which then uploads it to Django.
+ *
+ * Target platform: Arduino Micro
+ */
+
 #include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -93,7 +101,8 @@ unsigned long SensorMoment    = 0;
 unsigned long LogTimer        = 0;
 unsigned long LogMoment       = 0;
 
-
+// WDT state
+unsigned long WdtState = 0;
 
 
 void reboot () {
@@ -125,10 +134,10 @@ void setup()   {
   Serial1.begin(9600);
   while (!Serial1) ;
 
-  // connect the lcs
+  // connect the lcd
   lcd.createChar(0, deg);
   lcd.begin(16, 2);
-  delay(1000);  
+  delay(1000);
 
   // initialize dallas temperature sensors
   dallas.begin();
@@ -179,8 +188,9 @@ void setup()   {
   // initialize current sensor
   emon.current(CurrentPin, 111.1); 
 
-  // enable 8 seconds watchdog timer
-  wdt_enable(WDTO_8S);
+  // enable 2 seconds watchdog timer.
+  // takes some time to collect everything due to sampling etc
+  wdt_enable(WDTO_2S);
 }
 
 
@@ -268,6 +278,49 @@ void log_sensors() {
   Serial1.print(uptime);
   Serial1.println('/');
 }
+
+// Watchdog algorithm via
+// http://www.ganssle.com/item/great-watchdog-timers.htm
+void halt() {
+ while(1);
+}
+
+void wdt_a() {
+  if (WdtState != 0x5555) {
+    // halt the watchdog, which leads to its timeout
+    // and finally the system reset
+    halt();
+  }
+
+  // works, unless the sun erupts
+  WdtState += 0x1111;
+
+  if (WdtState != 0x6666) {
+    // what the what?!
+    halt();
+  }
+}
+
+void wdt_b() {
+  if (WdtState != 0x8888) {
+    // state calculations failed so we assume system failure.
+    // halt the watchdog, which leads to its timeout
+    // and finally the system reset
+    halt();
+  }
+  else {
+    // kick the dog
+    wdt_reset();
+  }
+
+  WdtState = 0;
+
+  if (WdtState != 0) {
+    // what the what?!
+    halt();
+  }
+}
+
 
 void screen () {
   // print the lcd display. what will be displayed depends on
@@ -377,6 +430,10 @@ void screen () {
 
 
 void loop(void) {
+  // reset WDT state
+  WdtState = 0x5555;
+  wdt_a();
+
   // record current moments
   LCDMoment = SensorMoment = LogMoment = millis();
 
@@ -413,9 +470,6 @@ void loop(void) {
     LogTimer = LogMoment;
   }
 
-  // reset watchdog to keep us running
-  wdt_reset();
-  
   // finally, re-paint the screen
   screen();
   
@@ -427,4 +481,8 @@ void loop(void) {
     // log uptime in seconds
     uptime = millis() / 1000;
   }
+
+  // hopefully reset WDT
+  WdtState += 0x2222;
+  wdt_b();
 }

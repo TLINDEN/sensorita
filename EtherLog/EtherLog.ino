@@ -5,6 +5,8 @@
  * very simple sketch, it reads from serial1 (5V TTL RX+TX)
  * and puts whatever it gets there out via http get request.
  *
+ * Target platform: Arduino Leonardo
+ *
  */
 
 #include "SPI.h"
@@ -12,6 +14,8 @@
 #include "Ethernet.h"
 #include "EthernetClient.h"
 #include <stdio.h>
+
+#include <avr/wdt.h>
 
 // uncomment if running via crossover for local testing
 //#define LOCAL
@@ -38,6 +42,50 @@ byte index = 0;
   IPAddress http_server(10,1,1,1);
 #endif
 
+// WDT state
+unsigned long WdtState = 0;
+
+// Watchdog algorithm via
+// http://www.ganssle.com/item/great-watchdog-timers.htm
+void halt() {
+ while(1);
+}
+
+void wdt_a() {
+  if (WdtState != 0x5555) {
+    // halt the watchdog, which leads to its timeout
+    // and finally the system reset
+    halt();
+  }
+
+  // works, unless the sun erupts
+  WdtState += 0x1111;
+
+  if (WdtState != 0x6666) {
+    // what the what?!
+    halt();
+  }
+}
+
+void wdt_b() {
+  if (WdtState != 0x8888) {
+    // state calculations failed so we assume system failure.
+    // halt the watchdog, which leads to its timeout
+    // and finally the system reset
+    halt();
+  }
+  else {
+    // kick the dog
+    wdt_reset();
+  }
+
+  WdtState = 0;
+
+  if (WdtState != 0) {
+    // what the what?!
+    halt();
+  }
+}
 
 void reset_eth() {
   byte net[]= { 255, 255, 255, 0 };
@@ -72,6 +120,7 @@ void setup () {
   Serial1.begin(9600);
   while (!Serial1) ;
   reset_eth();
+  wdt_enable(WDTO_1S);
 }
 
 
@@ -101,7 +150,14 @@ void checkrx() {
 }
 
 void loop () {
+  // reset WDT state
+  WdtState = 0x5555;
+  wdt_a();
+
+  // look for inputs
   checkrx();
-  //http_put("/haha");
-  //delay(2000);
+
+  // hopefully reset WDT
+  WdtState += 0x2222;
+  wdt_b();
 }
